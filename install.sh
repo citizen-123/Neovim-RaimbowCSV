@@ -1,10 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PLUGIN_NAME="rainbow-csv.nvim"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGINS=("rainbow-csv.nvim" "csv-sql.nvim")
+ONLY=""
 
-# Determine install target
+# Parse args
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --only)
+      ONLY="$2.nvim"
+      shift 2
+      ;;
+    --only=*)
+      ONLY="${1#--only=}.nvim"
+      shift
+      ;;
+    -h|--help)
+      echo "Usage: install.sh [--only <rainbow-csv|csv-sql>]"
+      echo "  --only    Install a single plugin instead of both"
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Determine pack directory
 if [[ -d "${XDG_DATA_HOME:-$HOME/.local/share}/nvim" ]]; then
   PACK_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/nvim/site/pack/plugins/start"
 elif [[ -d "$HOME/.config/nvim" ]]; then
@@ -15,28 +39,38 @@ else
   exit 1
 fi
 
-TARGET="$PACK_DIR/$PLUGIN_NAME"
-
-echo "Installing $PLUGIN_NAME"
-echo "  Source:  $SCRIPT_DIR"
-echo "  Target:  $TARGET"
-
-# Remove previous install if present
-if [[ -d "$TARGET" ]]; then
-  echo "  Removing existing installation..."
-  rm -rf "$TARGET"
-fi
-
-# Create pack directory if needed
 mkdir -p "$PACK_DIR"
 
-# Copy plugin files
-cp -r "$SCRIPT_DIR" "$TARGET"
+install_plugin() {
+  local name="$1"
+  local src="$SCRIPT_DIR/$name"
+  local dest="$PACK_DIR/$name"
 
-# Clean up non-plugin files from the installed copy
-rm -f "$TARGET/install.sh" "$TARGET/install.ps1"
+  if [[ ! -d "$src" ]]; then
+    echo "Plugin directory not found: $src"
+    return 1
+  fi
 
-echo ""
-echo "Done. Restart Neovim or run :packloadall to activate."
-echo "The plugin auto-enables on .csv, .tsv, and .psv files."
-echo "For other files, run :RainbowCsvEnable manually."
+  echo "Installing $name"
+  echo "  Source:  $src"
+  echo "  Target:  $dest"
+
+  if [[ -d "$dest" ]]; then
+    echo "  Removing existing installation..."
+    rm -rf "$dest"
+  fi
+
+  cp -r "$src" "$dest"
+  echo "  Done."
+  echo ""
+}
+
+if [[ -n "$ONLY" ]]; then
+  install_plugin "$ONLY"
+else
+  for plugin in "${PLUGINS[@]}"; do
+    install_plugin "$plugin"
+  done
+fi
+
+echo "Restart Neovim or run :packloadall to activate."

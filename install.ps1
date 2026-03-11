@@ -1,12 +1,18 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Installs rainbow-csv.nvim into the Neovim pack directory on Windows.
+    Installs Neovim CSV plugins into the Neovim pack directory on Windows.
+.PARAMETER Only
+    Install a single plugin: 'rainbow-csv' or 'csv-sql'
 #>
+param(
+    [ValidateSet('rainbow-csv', 'csv-sql')]
+    [string]$Only
+)
 
 $ErrorActionPreference = 'Stop'
-$PluginName = 'rainbow-csv.nvim'
-$ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$Plugins   = @('rainbow-csv.nvim', 'csv-sql.nvim')
 
 # Determine install target
 $CandidatePaths = @(
@@ -32,34 +38,41 @@ Ensure Neovim is installed and one of these exists:
     exit 1
 }
 
-$Target = Join-Path $PackDir $PluginName
-
-Write-Host "Installing $PluginName"
-Write-Host "  Source:  $ScriptDir"
-Write-Host "  Target:  $Target"
-
-# Remove previous install if present
-if (Test-Path $Target) {
-    Write-Host '  Removing existing installation...'
-    Remove-Item -Recurse -Force $Target
-}
-
-# Create pack directory if needed
 if (-not (Test-Path $PackDir)) {
     New-Item -ItemType Directory -Path $PackDir -Force | Out-Null
 }
 
-# Copy plugin files
-Copy-Item -Recurse -Path $ScriptDir -Destination $Target
+function Install-Plugin {
+    param([string]$Name)
 
-# Clean up non-plugin files from the installed copy
-$CleanupFiles = @('install.sh', 'install.ps1')
-foreach ($f in $CleanupFiles) {
-    $fp = Join-Path $Target $f
-    if (Test-Path $fp) { Remove-Item -Force $fp }
+    $Source = Join-Path $ScriptDir $Name
+    $Target = Join-Path $PackDir $Name
+
+    if (-not (Test-Path $Source)) {
+        Write-Error "Plugin directory not found: $Source"
+        return
+    }
+
+    Write-Host "Installing $Name"
+    Write-Host "  Source:  $Source"
+    Write-Host "  Target:  $Target"
+
+    if (Test-Path $Target) {
+        Write-Host '  Removing existing installation...'
+        Remove-Item -Recurse -Force $Target
+    }
+
+    Copy-Item -Recurse -Path $Source -Destination $Target
+    Write-Host '  Done.'
+    Write-Host ''
 }
 
-Write-Host ''
-Write-Host 'Done. Restart Neovim or run :packloadall to activate.'
-Write-Host 'The plugin auto-enables on .csv, .tsv, and .psv files.'
-Write-Host 'For other files, run :RainbowCsvEnable manually.'
+if ($Only) {
+    Install-Plugin -Name "$Only.nvim"
+} else {
+    foreach ($plugin in $Plugins) {
+        Install-Plugin -Name $plugin
+    }
+}
+
+Write-Host 'Restart Neovim or run :packloadall to activate.'
