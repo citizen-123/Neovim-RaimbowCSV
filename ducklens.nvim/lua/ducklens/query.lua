@@ -1,30 +1,37 @@
-local duckdb = require("csv-sql.duckdb")
-local display = require("csv-sql.display")
+local duckdb = require("ducklens.duckdb")
+local display = require("ducklens.display")
+local formats = require("ducklens.formats")
 
 local M = {}
 
 ---@type string[] command history
 local history = {}
 
---- Build SQL that creates a view alias for the current file, then runs the user query.
+--- Build SQL that creates view aliases for the file, then runs the user query.
 ---@param filepath string
----@param user_sql string
----@return string
+---@return string sql_prefix
+---@return string alias  clean table name
+---@return string|nil error
 local function wrap_query(filepath, user_sql)
-  local escaped = filepath:gsub("'", "''")
+  local reader, fmt, err = formats.reader_expr(filepath)
+  if err then
+    return "", "", err
+  end
+
   local basename = vim.fn.fnamemodify(filepath, ":t:r")
   local alias = basename:gsub("[^%w_]", "_"):lower()
 
-  -- Create a view so the user can reference the table by a clean name
-  -- Also expose it as 'csv' for convenience
-  return string.format([[
-CREATE OR REPLACE VIEW "%s" AS SELECT * FROM read_csv('%s', auto_detect=true, header=true);
-CREATE OR REPLACE VIEW csv AS SELECT * FROM "%s";
+  -- Create views so the user can reference by clean name or generic "data"
+  local sql = string.format([[
+CREATE OR REPLACE VIEW "%s" AS SELECT * FROM %s;
+CREATE OR REPLACE VIEW data AS SELECT * FROM "%s";
 %s
-]], alias, escaped, alias, user_sql)
+]], alias, reader, alias, user_sql)
+
+  return sql, alias, nil
 end
 
---- Execute a SQL query against the current buffer's CSV.
+--- Execute a SQL query against the current buffer's file.
 ---@param sql string  user-provided SQL
 ---@param buf? number
 function M.query(sql, buf)
@@ -32,39 +39,40 @@ function M.query(sql, buf)
   local filepath = vim.api.nvim_buf_get_name(buf)
 
   if filepath == "" then
-    vim.notify("csv-sql: Buffer has no file path. Save the file first.", vim.log.levels.ERROR)
+    vim.notify("ducklens: Buffer has no file path. Save the file first.", vim.log.levels.ERROR)
     return
   end
 
   if sql == "" then
-    vim.notify("csv-sql: No SQL provided.", vim.log.levels.WARN)
+    vim.notify("ducklens: No SQL provided.", vim.log.levels.WARN)
     return
   end
 
-  -- Store in history
   history[#history + 1] = sql
 
-  vim.notify("csv-sql: Running query...", vim.log.levels.INFO)
+  vim.notify("ducklens: Running query...", vim.log.levels.INFO)
 
-  local full_sql = wrap_query(filepath, sql)
+  local full_sql, _, err = wrap_query(filepath, sql)
+  if err then
+    vim.notify("ducklens: " .. err, vim.log.levels.ERROR)
+    return
+  end
 
   duckdb.run_async(full_sql, {}, function(stdout, stderr, code)
     if code ~= 0 then
-      vim.notify("csv-sql: Query error:\n" .. stderr, vim.log.levels.ERROR)
+      vim.notify("ducklens: Query error:\n" .. stderr, vim.log.levels.ERROR)
       return
     end
 
     if stdout == "" or stdout:match("^%s*$") then
-      vim.notify("csv-sql: Query returned no output.", vim.log.levels.INFO)
+      vim.notify("ducklens: Query returned no output.", vim.log.levels.INFO)
       return
     end
 
-    -- Try JSON parse for tabular display
     local ok, rows = pcall(vim.json.decode, stdout)
     if ok and type(rows) == "table" and #rows > 0 then
       display.show_results(rows, sql)
     else
-      -- Fallback: show raw output
       display.show_text(stdout, "text", "Query Result")
     end
   end)
@@ -77,9 +85,11 @@ function M.prompt(buf)
   local filepath = vim.api.nvim_buf_get_name(buf)
   local basename = vim.fn.fnamemodify(filepath, ":t:r")
   local alias = basename:gsub("[^%w_]", "_"):lower()
+  local fmt = formats.detect(filepath)
+  local fmt_label = fmt and fmt.name or "?"
 
   vim.ui.input({
-    prompt = string.format("SQL (tables: %s, csv)> ", alias),
+    prompt = string.format("SQL [%s] (tables: %s, data)> ", fmt_label, alias),
     completion = "file",
   }, function(input)
     if input and input ~= "" then
@@ -89,15 +99,15 @@ function M.prompt(buf)
 end
 
 --- Open a scratch buffer for multi-line SQL editing.
---- Execute with a keybinding from within the scratch buffer.
 ---@param buf? number
 function M.editor(buf)
   buf = buf or vim.api.nvim_get_current_buf()
   local filepath = vim.api.nvim_buf_get_name(buf)
   local basename = vim.fn.fnamemodify(filepath, ":t:r")
   local alias = basename:gsub("[^%w_]", "_"):lower()
+  local fmt = formats.detect(filepath)
+  local fmt_label = fmt and fmt.name or "?"
 
-  -- Create scratch split
   vim.cmd("botright 12new")
   local edit_buf = vim.api.nvim_get_current_buf()
 
@@ -106,21 +116,17 @@ function M.editor(buf)
   vim.bo[edit_buf].swapfile = false
   vim.bo[edit_buf].filetype = "sql"
 
-  -- Seed with a helpful comment
   vim.api.nvim_buf_set_lines(edit_buf, 0, -1, false, {
-    string.format("-- Tables: %s, csv  |  Source: %s", alias, vim.fn.fnamemodify(filepath, ":t")),
-    string.format("-- Press <C-CR> or <leader>qr to execute"),
+    string.format("-- [%s] Tables: %s, data  |  Source: %s", fmt_label, alias, vim.fn.fnamemodify(filepath, ":t")),
+    "-- Press <C-CR> or <leader>qr to execute",
     "",
     string.format("SELECT * FROM %s LIMIT 10;", alias),
   })
 
-  -- Place cursor on the SELECT line
   vim.api.nvim_win_set_cursor(0, { 4, 0 })
 
-  -- Keymap to execute the buffer contents as a query
   local function execute()
     local lines = vim.api.nvim_buf_get_lines(edit_buf, 0, -1, false)
-    -- Strip comment lines
     local sql_lines = {}
     for _, line in ipairs(lines) do
       if not line:match("^%s*%-%-") then
@@ -128,7 +134,7 @@ function M.editor(buf)
       end
     end
     local sql = table.concat(sql_lines, "\n")
-    M.query(sql, buf) -- run against the original CSV buffer
+    M.query(sql, buf)
   end
 
   vim.keymap.set("n", "<C-CR>", execute, { buffer = edit_buf, desc = "Execute SQL query" })

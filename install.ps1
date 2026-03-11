@@ -3,16 +3,16 @@
 .SYNOPSIS
     Installs Neovim CSV plugins into the Neovim pack directory on Windows.
 .PARAMETER Only
-    Install a single plugin: 'rainbow-csv' or 'csv-sql'
+    Install a single plugin: 'rainbow-csv' or 'ducklens'
 #>
 param(
-    [ValidateSet('rainbow-csv', 'csv-sql')]
+    [ValidateSet('rainbow-csv', 'ducklens')]
     [string]$Only
 )
 
 $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$Plugins   = @('rainbow-csv.nvim', 'csv-sql.nvim')
+$Plugins   = @('rainbow-csv.nvim', 'ducklens.nvim')
 
 # Determine install target
 $CandidatePaths = @(

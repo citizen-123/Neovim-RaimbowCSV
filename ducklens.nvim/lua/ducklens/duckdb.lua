@@ -11,16 +11,18 @@ function M.find_binary()
   end
 
   -- Check explicit user override first
-  if vim.g.csvsql_duckdb_path then
-    if vim.fn.executable(vim.g.csvsql_duckdb_path) == 1 then
-      duckdb_path = vim.g.csvsql_duckdb_path
+  if vim.g.ducklens_duckdb_path then
+    if vim.fn.executable(vim.g.ducklens_duckdb_path) == 1 then
+      duckdb_path = vim.g.ducklens_duckdb_path
       return duckdb_path
     end
-    vim.notify("csv-sql: g:csvsql_duckdb_path is set but not executable: " .. vim.g.csvsql_duckdb_path, vim.log.levels.ERROR)
+    vim.notify(
+      "ducklens: g:ducklens_duckdb_path is set but not executable: " .. vim.g.ducklens_duckdb_path,
+      vim.log.levels.ERROR
+    )
     return nil
   end
 
-  -- Search PATH
   if vim.fn.executable("duckdb") == 1 then
     duckdb_path = "duckdb"
     return duckdb_path
@@ -29,8 +31,7 @@ function M.find_binary()
   return nil
 end
 
---- Run a DuckDB SQL query and return stdout, stderr, exit code.
---- Runs synchronously (blocking). For async, see run_async.
+--- Run a DuckDB SQL query synchronously.
 ---@param sql string
 ---@param opts? { csv_mode?: boolean }
 ---@return string stdout
@@ -40,15 +41,11 @@ function M.run(sql, opts)
   opts = opts or {}
   local bin = M.find_binary()
   if not bin then
-    return "", "DuckDB not found. Install it or set g:csvsql_duckdb_path", 1
+    return "", "DuckDB not found. Install it or set g:ducklens_duckdb_path", 1
   end
 
-  local args = { bin, "-json" }
-  if opts.csv_mode then
-    args = { bin, "-csv" }
-  end
+  local output_flag = opts.csv_mode and "-csv" or "-json"
 
-  -- Write SQL to a temp file to avoid shell escaping issues
   local tmpfile = vim.fn.tempname() .. ".sql"
   local f = io.open(tmpfile, "w")
   if not f then
@@ -57,11 +54,7 @@ function M.run(sql, opts)
   f:write(sql)
   f:close()
 
-  table.insert(args, "-c")
-  table.insert(args, ".read " .. tmpfile)
-
-  local result = vim.system(args, { text = true }):wait()
-
+  local result = vim.system({ bin, output_flag, "-c", ".read " .. tmpfile }, { text = true }):wait()
   os.remove(tmpfile)
 
   return result.stdout or "", result.stderr or "", result.code
@@ -76,15 +69,12 @@ function M.run_async(sql, opts, callback)
   local bin = M.find_binary()
   if not bin then
     vim.schedule(function()
-      callback("", "DuckDB not found. Install it or set g:csvsql_duckdb_path", 1)
+      callback("", "DuckDB not found. Install it or set g:ducklens_duckdb_path", 1)
     end)
     return
   end
 
-  local args = { bin, "-json" }
-  if opts.csv_mode then
-    args = { bin, "-csv" }
-  end
+  local output_flag = opts.csv_mode and "-csv" or "-json"
 
   local tmpfile = vim.fn.tempname() .. ".sql"
   local f = io.open(tmpfile, "w")
@@ -97,10 +87,7 @@ function M.run_async(sql, opts, callback)
   f:write(sql)
   f:close()
 
-  table.insert(args, "-c")
-  table.insert(args, ".read " .. tmpfile)
-
-  vim.system(args, { text = true }, function(result)
+  vim.system({ bin, output_flag, "-c", ".read " .. tmpfile }, { text = true }, function(result)
     os.remove(tmpfile)
     vim.schedule(function()
       callback(result.stdout or "", result.stderr or "", result.code)

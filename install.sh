@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PLUGINS=("rainbow-csv.nvim" "csv-sql.nvim")
+PLUGINS=("rainbow-csv.nvim" "ducklens.nvim")
 ONLY=""
 
 # Parse args
@@ -17,7 +17,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h|--help)
-      echo "Usage: install.sh [--only <rainbow-csv|csv-sql>]"
+      echo "Usage: install.sh [--only <rainbow-csv|ducklens>]"
       echo "  --only    Install a single plugin instead of both"
       exit 0
       ;;
